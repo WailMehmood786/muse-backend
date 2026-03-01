@@ -1,0 +1,29 @@
+// 1. Provider ko mysql kar diya kyunki cPanel MySQL use karta hai
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id       String  @id @default(uuid())
+  email    String  @unique
+  password String
+  name     String?
+  chats    Chat[]
+}
+
+model Chat {
+  id        String   @id @default(uuid())
+  content   String   @db.Text // MySQL mein lambay text ke liye @db.Text zaroori hai
+  role      String
+  userId    String
+  sessionId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId]) // Performance ke liye index lazmi hai
+}

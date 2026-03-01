@@ -1,0 +1,24 @@
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION BEGIN
+PassengerAppRoot "/home/wailmehm/writer.wailmehmood.com/backend"
+PassengerBaseURI "/"
+PassengerNodejs "/home/wailmehm/nodevenv/writer.wailmehmood.com/backend/18/bin/node"
+PassengerAppType node
+PassengerStartupFile index.js
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION END
+
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION BEGIN
+<IfModule Litespeed>
+SetEnv NODE_ENV production
+SetEnv PORT 5000
+
+# MySQL Database Details
+SetEnv DB_HOST localhost
+SetEnv DB_USER wailmehm_user
+SetEnv DB_PASSWORD Wail@#786
+SetEnv DB_NAME wailmehm_wailmehm_muse_db
+
+# Auth & API Keys
+SetEnv JWT_SECRET WailMuse786SecureKey
+SetEnv GEMINI_API_KEY AIzaSyCmqCLQTimTtlyI_6GvvTSoUkCMUVWg4XE
+</IfModule>
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION END
