@@ -9,18 +9,36 @@ require('dotenv').config();
 const app = express();
 const prisma = new PrismaClient();
 
-// Safe Gemini Initialization
-const apiKey = process.env.GEMINI_API_KEY || "DUMMY_KEY";
-if (apiKey === "DUMMY_KEY") {
-    console.error("❌ ERROR: GEMINI_API_KEY is missing in environment variables!");
+// --- Gemini Initialization ---
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+    console.error("❌ ERROR: GEMINI_API_KEY is missing!");
 }
-const genAI = new GoogleGenerativeAI(apiKey);
+const genAI = new GoogleGenerativeAI(apiKey || "");
 
 app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'wail_muse_secure_key_786';
 
+// --- HEALTH CHECK & TESTING ROUTES ---
+// Taake "Cannot GET /" ka masla khatam ho
+app.get('/', (req, res) => {
+    res.send("🚀 Muse Backend is Live and Running!");
+});
+
+// AI Test Route (Directly check if Gemini is working)
+app.get('/api/test-ai', async (req, res) => {
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent("Hello, are you active?");
+        res.json({ success: true, response: result.response.text() });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- AUTHENTICATION ---
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -33,7 +51,6 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// --- REGULAR AUTH ---
 app.post('/api/auth/signup', async (req, res) => {
     try {
         const { email, password, name } = req.body;
@@ -54,51 +71,39 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Server error." }); }
 });
 
-// --- GOOGLE AUTHENTICATION ROUTE ---
+// --- GOOGLE AUTH ---
 app.post('/api/auth/google', async (req, res) => {
     try {
         const { token } = req.body;
-        if (!token) return res.status(400).json({ error: "Token is required." });
-
         const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${token}` }
         });
         const googleData = await googleRes.json();
         if (!googleData.email) return res.status(400).json({ error: "Invalid Google Token." });
 
-        const { email, name } = googleData;
-        let user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-
+        let user = await prisma.user.findUnique({ where: { email: googleData.email.toLowerCase() } });
         if (!user) {
-            const randomPassword = Math.random().toString(36).slice(-10) + "A1!"; 
-            const hashedPassword = await bcrypt.hash(randomPassword, 10);
+            const randomPass = Math.random().toString(36).slice(-10);
             user = await prisma.user.create({
-                data: { email: email.toLowerCase(), password: hashedPassword, name: name || "Google User" }
+                data: { email: googleData.email.toLowerCase(), password: await bcrypt.hash(randomPass, 10), name: googleData.name || "User" }
             });
         }
-
         const jwtToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ token: jwtToken, name: user.name, id: user.id });
-    } catch (error) { res.status(500).json({ error: "Google Authentication failed." }); }
+    } catch (error) { res.status(500).json({ error: "Google Auth failed." }); }
 });
 
+// --- SESSION MANAGEMENT ---
 app.get('/api/sessions/:userId', async (req, res) => {
     try {
         const sessions = await prisma.chat.findMany({
-            where: { userId: req.params.userId, role: "user" },
-            distinct: ['sessionId'], 
+            where: { userId: req.params.userId },
+            distinct: ['sessionId'],
             orderBy: { createdAt: 'desc' },
-            select: { sessionId: true, content: true, createdAt: true }
+            select: { sessionId: true, content: true, createdAt: true, role: true }
         });
-        res.json(sessions || []); 
+        res.json(sessions);
     } catch (error) { res.status(500).json({ error: "Fetch failed." }); }
-});
-
-app.delete('/api/sessions/:sessionId', async (req, res) => {
-    try {
-        await prisma.chat.deleteMany({ where: { sessionId: req.params.sessionId } });
-        res.status(200).json({ message: "Deleted." });
-    } catch (error) { res.status(500).json({ error: "Delete failed." }); }
 });
 
 app.get('/api/history/:sessionId', async (req, res) => {
@@ -107,65 +112,56 @@ app.get('/api/history/:sessionId', async (req, res) => {
             where: { sessionId: req.params.sessionId },
             orderBy: { createdAt: 'asc' }
         });
-        res.json(chats || []);
-    } catch (error) { res.status(500).json({ error: "Failed to load history." }); }
+        res.json(chats);
+    } catch (error) { res.status(500).json({ error: "History failed." }); }
 });
 
-// --- MAIN AI CHAT ROUTE (MASTER FIX) ---
+app.delete('/api/sessions/:sessionId', async (req, res) => {
+    try {
+        await prisma.chat.deleteMany({ where: { sessionId: req.params.sessionId } });
+        res.json({ message: "Deleted." });
+    } catch (error) { res.status(500).json({ error: "Delete failed." }); }
+});
+
+// --- MAIN AI CHAT ROUTE ---
 app.post('/api/chat', async (req, res) => {
     try {
         const { message, userId, history, sessionId, mode } = req.body;
-        if (!message) return res.status(400).json({ error: "Message is required" });
+        if (!message) return res.status(400).json({ error: "Message required" });
 
-        const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const currentSessionId = sessionId || `session_${Date.now()}`;
         const writingMode = mode || "Creative";
 
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash", // Stable Free Tier Model
-            systemInstruction: `You are an elite professional ghostwriter creating a custom GPT experience. Your job is to interview the user and write their book for them from start to finish.
-            CRITICAL DUAL-RESPONSE WORKFLOW:
-            Every single time you have enough detail to write a piece of the book, you MUST separate the "Book Content" from the "Chat Conversation" using specific tags.
-            FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
-            [START_DRAFT]
-            (Write the actual polished, beautifully crafted book paragraphs here, in the user's voice, matching the ${writingMode} style.)
-            [END_DRAFT]
-            (Write your friendly chat response and ask your NEXT specific interview question here, outside the tags.)
-            STRICT RULES:
-            1. VOICE: Capture the user's unique tone.
-            2. DIG DEEPER: Ask for sensory details (smells, sounds, feelings).
-            3. ONE QUESTION: Never ask multiple questions at once. Give them space to think.
-            4. USE TAGS: ALWAYS wrap book content in [START_DRAFT] and [END_DRAFT].
-            5. ONLY SPEAK ENGLISH.`
+            model: "gemini-2.0-flash",
+            systemInstruction: `You are an elite professional ghostwriter. Interview the user to write their book. 
+            Format book content between [START_DRAFT] and [END_DRAFT]. Style: ${writingMode}. Ask only ONE question at a time.`
         });
 
-        // --- ANTI-CRASH HISTORY FILTER ---
-        let rawHistory = (history || [])
+        // 1. Structure history correctly
+        let formattedHistory = (history || [])
+            .filter(h => h.text && h.text.trim() !== "")
             .map(h => ({
                 role: h.role === 'ai' || h.role === 'model' ? 'model' : 'user',
-                text: h.text || ""
-            }))
-            .filter(h => h.text.trim() !== "");
+                parts: [{ text: h.text }]
+            }));
 
-        let validHistory = [];
-        let lastRole = null;
-        
-        // Merge consecutive messages to strictly alternate user->model->user->model
-        for (const msg of rawHistory) {
-            if (msg.role !== lastRole) {
-                validHistory.push({ role: msg.role, parts: [{ text: msg.text }] });
-                lastRole = msg.role;
+        // 2. Ensure Strict Alternation (User -> Model -> User)
+        let finalHistory = [];
+        formattedHistory.forEach((msg, i) => {
+            if (i > 0 && msg.role === finalHistory[finalHistory.length - 1].role) {
+                finalHistory[finalHistory.length - 1].parts[0].text += "\n" + msg.parts[0].text;
             } else {
-                validHistory[validHistory.length - 1].parts[0].text += `\n\n${msg.text}`;
+                finalHistory.push(msg);
             }
+        });
+
+        // 3. Last message MUST be from model if we are sending a new message
+        if (finalHistory.length > 0 && finalHistory[finalHistory.length - 1].role === 'user') {
+            finalHistory.pop();
         }
 
-        // Gemini API throws an error if history ends with 'user' because sendMessage implies another 'user'
-        if (validHistory.length > 0 && validHistory[validHistory.length - 1].role === 'user') {
-            validHistory.pop();
-        }
-        // ----------------------------------
-
-        const chat = model.startChat({ history: validHistory });
+        const chat = model.startChat({ history: finalHistory });
         const result = await chat.sendMessage(message);
         const reply = result.response.text();
 
@@ -175,7 +171,7 @@ app.post('/api/chat', async (req, res) => {
                     { content: message, role: 'user', userId, sessionId: currentSessionId },
                     { content: reply, role: 'ai', userId, sessionId: currentSessionId }
                 ]
-            }).catch(e => console.error("DB Save Warning:", e));
+            }).catch(e => console.log("DB Skip:", e.message));
         }
 
         res.json({ reply, sessionId: currentSessionId });
