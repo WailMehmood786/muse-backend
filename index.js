@@ -11,23 +11,25 @@ const prisma = new PrismaClient();
 
 // --- Gemini Initialization ---
 const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-    console.error("❌ ERROR: GEMINI_API_KEY is missing!");
-}
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
-app.use(cors());
+// --- CORS Configuration (IMPORTANT for Vercel) ---
+app.use(cors({
+  origin: ["https://muse-frontend-three.vercel.app", "http://localhost:3000"], // Frontend URL here
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
+
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'wail_muse_secure_key_786';
 
-// --- HEALTH CHECK & TESTING ROUTES ---
-// Taake "Cannot GET /" ka masla khatam ho
+// --- HEALTH CHECK ---
 app.get('/', (req, res) => {
     res.send("🚀 Muse Backend is Live and Running!");
 });
 
-// AI Test Route (Directly check if Gemini is working)
+// AI Test Route
 app.get('/api/test-ai', async (req, res) => {
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -38,7 +40,7 @@ app.get('/api/test-ai', async (req, res) => {
     }
 });
 
-// --- AUTHENTICATION ---
+// --- AUTHENTICATION MIDDLEWARE ---
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -51,6 +53,7 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
+// Signup
 app.post('/api/auth/signup', async (req, res) => {
     try {
         const { email, password, name } = req.body;
@@ -58,9 +61,10 @@ app.post('/api/auth/signup', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await prisma.user.create({ data: { email: email.toLowerCase(), password: hashedPassword, name } });
         res.status(201).json({ message: "Account created!", id: user.id, name: user.name });
-    } catch (err) { res.status(500).json({ error: "Signup failed." }); }
+    } catch (err) { res.status(500).json({ error: "Signup failed. Email might already exist." }); }
 });
 
+// Login
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -71,7 +75,7 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Server error." }); }
 });
 
-// --- GOOGLE AUTH ---
+// Google Auth
 app.post('/api/auth/google', async (req, res) => {
     try {
         const { token } = req.body;
@@ -135,38 +139,40 @@ app.post('/api/chat', async (req, res) => {
         const model = genAI.getGenerativeModel({ 
             model: "gemini-2.0-flash",
             systemInstruction: `You are an elite professional ghostwriter. Interview the user to write their book. 
-            Format book content between [START_DRAFT] and [END_DRAFT]. Style: ${writingMode}. Ask only ONE question at a time.`
+            Format book content between [START_DRAFT] and [END_DRAFT]. Style: ${writingMode}. Ask only ONE question at a time. Be very engaging.`
         });
 
-        // 1. Structure history correctly
-        let formattedHistory = (history || [])
-            .filter(h => h.text && h.text.trim() !== "")
-            .map(h => ({
-                role: h.role === 'ai' || h.role === 'model' ? 'model' : 'user',
-                parts: [{ text: h.text }]
-            }));
-
-        // 2. Ensure Strict Alternation (User -> Model -> User)
+        // Structure history for Gemini
         let finalHistory = [];
-        formattedHistory.forEach((msg, i) => {
-            if (i > 0 && msg.role === finalHistory[finalHistory.length - 1].role) {
-                finalHistory[finalHistory.length - 1].parts[0].text += "\n" + msg.parts[0].text;
-            } else {
-                finalHistory.push(msg);
-            }
-        });
+        if (history && history.length > 0) {
+            let tempHistory = history
+                .filter(h => h.text && h.text.trim() !== "")
+                .map(h => ({
+                    role: h.role === 'ai' || h.role === 'model' ? 'model' : 'user',
+                    parts: [{ text: h.text }]
+                }));
 
-        // 3. Last message MUST be from model if we are sending a new message
-        if (finalHistory.length > 0 && finalHistory[finalHistory.length - 1].role === 'user') {
-            finalHistory.pop();
+            // Merge consecutive messages with the same role
+            tempHistory.forEach((msg, i) => {
+                if (i > 0 && msg.role === finalHistory[finalHistory.length - 1].role) {
+                    finalHistory[finalHistory.length - 1].parts[0].text += "\n" + msg.parts[0].text;
+                } else {
+                    finalHistory.push(msg);
+                }
+            });
+
+            // Ensure starts with 'user' and ends with 'model'
+            if (finalHistory.length > 0 && finalHistory[0].role !== 'user') finalHistory.shift();
+            if (finalHistory.length > 0 && finalHistory[finalHistory.length - 1].role !== 'model') finalHistory.pop();
         }
 
         const chat = model.startChat({ history: finalHistory });
         const result = await chat.sendMessage(message);
         const reply = result.response.text();
 
+        // Save to DB asynchronously (don't block response)
         if (userId) {
-            await prisma.chat.createMany({
+            prisma.chat.createMany({
                 data: [
                     { content: message, role: 'user', userId, sessionId: currentSessionId },
                     { content: reply, role: 'ai', userId, sessionId: currentSessionId }
