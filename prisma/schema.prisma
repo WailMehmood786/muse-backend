@@ -1,11 +1,10 @@
-// 1. Provider ko mysql kar diya kyunki cPanel MySQL use karta hai
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
@@ -19,12 +18,12 @@ model User {
 
 model Chat {
   id        String   @id @default(uuid())
-  content   String   @db.Text // MySQL mein lambay text ke liye @db.Text zaroori hai
+  content   String   
   role      String
   userId    String
   sessionId String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
-  @@index([userId]) // Performance ke liye index lazmi hai
+  @@index([userId])
 }
