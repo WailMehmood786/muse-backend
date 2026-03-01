@@ -2,39 +2,42 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { PrismaClient } = require('@prisma/client');
+const Groq = require('groq-sdk'); // Groq use karenge lightning speed ke liye
 require('dotenv').config();
 
 const app = express();
 const prisma = new PrismaClient();
 
-// --- Gemini Initialization ---
-const apiKey = process.env.GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(apiKey || "");
+// --- Groq Initialization ---
+const groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY, // Railway mein ye key dalni hai
+});
 
-// --- CORS Configuration (IMPORTANT for Vercel) ---
+// --- CORS Configuration ---
 app.use(cors({
-  origin: ["https://muse-frontend-three.vercel.app", "http://localhost:3000"], // Frontend URL here
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
+    origin: ["https://muse-frontend-three.vercel.app", "http://localhost:3000"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true
 }));
 
 app.use(express.json());
 
-const JWT_SECRET = process.env.JWT_SECRET || 'wail_muse_secure_key_786';
+const JWT_SECRET = process.env.JWT_SECRET || 'WailMuse786SecureKey';
 
 // --- HEALTH CHECK ---
 app.get('/', (req, res) => {
-    res.send("🚀 Muse Backend is Live and Running!");
+    res.send("🚀 Muse Backend (Groq Ultra-Fast) is Online!");
 });
 
-// AI Test Route
+// AI Test Route (Groq Version)
 app.get('/api/test-ai', async (req, res) => {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-        const result = await model.generateContent("Hello, are you active?");
-        res.json({ success: true, response: result.response.text() });
+        const completion = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile",
+            messages: [{ role: "user", content: "Hello, are you active?" }],
+        });
+        res.json({ success: true, response: completion.choices[0].message.content });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -53,7 +56,7 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// Signup
+// --- AUTH ROUTES ---
 app.post('/api/auth/signup', async (req, res) => {
     try {
         const { email, password, name } = req.body;
@@ -61,10 +64,9 @@ app.post('/api/auth/signup', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await prisma.user.create({ data: { email: email.toLowerCase(), password: hashedPassword, name } });
         res.status(201).json({ message: "Account created!", id: user.id, name: user.name });
-    } catch (err) { res.status(500).json({ error: "Signup failed. Email might already exist." }); }
+    } catch (err) { res.status(500).json({ error: "Signup failed." }); }
 });
 
-// Login
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -75,7 +77,6 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Server error." }); }
 });
 
-// Google Auth
 app.post('/api/auth/google', async (req, res) => {
     try {
         const { token } = req.body;
@@ -87,9 +88,8 @@ app.post('/api/auth/google', async (req, res) => {
 
         let user = await prisma.user.findUnique({ where: { email: googleData.email.toLowerCase() } });
         if (!user) {
-            const randomPass = Math.random().toString(36).slice(-10);
             user = await prisma.user.create({
-                data: { email: googleData.email.toLowerCase(), password: await bcrypt.hash(randomPass, 10), name: googleData.name || "User" }
+                data: { email: googleData.email.toLowerCase(), password: await bcrypt.hash(Math.random().toString(), 10), name: googleData.name || "User" }
             });
         }
         const jwtToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
@@ -97,14 +97,14 @@ app.post('/api/auth/google', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Google Auth failed." }); }
 });
 
-// --- SESSION MANAGEMENT ---
+// --- SESSION & HISTORY ---
 app.get('/api/sessions/:userId', async (req, res) => {
     try {
         const sessions = await prisma.chat.findMany({
             where: { userId: req.params.userId },
             distinct: ['sessionId'],
             orderBy: { createdAt: 'desc' },
-            select: { sessionId: true, content: true, createdAt: true, role: true }
+            select: { sessionId: true, content: true, createdAt: true }
         });
         res.json(sessions);
     } catch (error) { res.status(500).json({ error: "Fetch failed." }); }
@@ -127,7 +127,7 @@ app.delete('/api/sessions/:sessionId', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Delete failed." }); }
 });
 
-// --- MAIN AI CHAT ROUTE ---
+// --- MAIN AI CHAT ROUTE (Groq Integration) ---
 app.post('/api/chat', async (req, res) => {
     try {
         const { message, userId, history, sessionId, mode } = req.body;
@@ -136,41 +136,35 @@ app.post('/api/chat', async (req, res) => {
         const currentSessionId = sessionId || `session_${Date.now()}`;
         const writingMode = mode || "Creative";
 
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash",
-            systemInstruction: `You are an elite professional ghostwriter. Interview the user to write their book. 
-            Format book content between [START_DRAFT] and [END_DRAFT]. Style: ${writingMode}. Ask only ONE question at a time. Be very engaging.`
-        });
+        const systemPrompt = `You are Muse, an elite professional ghostwriter. 
+        Interview the user to write their book. 
+        Format book content between [START_DRAFT] and [END_DRAFT]. 
+        Style: ${writingMode}. Ask only ONE question at a time. Be very engaging.`;
 
-        // Structure history for Gemini
-        let finalHistory = [];
+        let apiMessages = [{ role: "system", content: systemPrompt }];
+
         if (history && history.length > 0) {
-            let tempHistory = history
-                .filter(h => h.text && h.text.trim() !== "")
-                .map(h => ({
-                    role: h.role === 'ai' || h.role === 'model' ? 'model' : 'user',
-                    parts: [{ text: h.text }]
-                }));
-
-            // Merge consecutive messages with the same role
-            tempHistory.forEach((msg, i) => {
-                if (i > 0 && msg.role === finalHistory[finalHistory.length - 1].role) {
-                    finalHistory[finalHistory.length - 1].parts[0].text += "\n" + msg.parts[0].text;
-                } else {
-                    finalHistory.push(msg);
+            history.forEach(h => {
+                if (h.text || h.content) {
+                    apiMessages.push({
+                        role: h.role === 'ai' || h.role === 'assistant' ? 'assistant' : 'user',
+                        content: h.text || h.content
+                    });
                 }
             });
-
-            // Ensure starts with 'user' and ends with 'model'
-            if (finalHistory.length > 0 && finalHistory[0].role !== 'user') finalHistory.shift();
-            if (finalHistory.length > 0 && finalHistory[finalHistory.length - 1].role !== 'model') finalHistory.pop();
         }
 
-        const chat = model.startChat({ history: finalHistory });
-        const result = await chat.sendMessage(message);
-        const reply = result.response.text();
+        apiMessages.push({ role: "user", content: message });
 
-        // Save to DB asynchronously (don't block response)
+        const completion = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile",
+            messages: apiMessages,
+            temperature: 0.7,
+            max_tokens: 4096
+        });
+
+        const reply = completion.choices[0].message.content;
+
         if (userId) {
             prisma.chat.createMany({
                 data: [
@@ -181,14 +175,13 @@ app.post('/api/chat', async (req, res) => {
         }
 
         res.json({ reply, sessionId: currentSessionId });
-    } catch (error) { 
-        console.error("🔥 AI CHAT ERROR:", error.message);
-        res.status(500).json({ error: "Muse is taking a break.", details: error.message }); 
+    } catch (error) {
+        console.error("🔥 GROQ ERROR:", error.message);
+        res.status(500).json({ error: "Muse is exhausted.", details: error.message });
     }
 });
 
 const PORT = process.env.PORT || 8080;
-
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Muse Server live on port ${PORT}`);
+    console.log(`🚀 Muse Server (Groq) live on port ${PORT}`);
 });
