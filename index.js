@@ -8,6 +8,11 @@ require('dotenv').config();
 
 const app = express();
 const prisma = new PrismaClient();
+
+// Gemini Initialization with check
+if (!process.env.GEMINI_API_KEY) {
+    console.error("❌ ERROR: GEMINI_API_KEY is missing in environment variables!");
+}
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 app.use(cors());
@@ -15,6 +20,7 @@ app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'wail_muse_secure_key_786';
 
+// --- AUTH MIDDLEWARE ---
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -27,7 +33,7 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// --- REGULAR AUTH ---
+// --- AUTH ROUTES ---
 app.post('/api/auth/signup', async (req, res) => {
     try {
         const { email, password, name } = req.body;
@@ -48,26 +54,23 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Server error." }); }
 });
 
-// --- GOOGLE AUTHENTICATION ROUTE ---
+// --- GOOGLE AUTH ---
 app.post('/api/auth/google', async (req, res) => {
     try {
         const { token } = req.body;
         if (!token) return res.status(400).json({ error: "Token is required." });
 
-        // Google se secure tareeqe se user ki email aur name fetch karo
         const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${token}` }
         });
         const googleData = await googleRes.json();
-
         if (!googleData.email) return res.status(400).json({ error: "Invalid Google Token." });
 
         const { email, name } = googleData;
         let user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
 
-        // Agar user pehli dafa google se login kar raha hai, toh naya account banao
         if (!user) {
-            const randomPassword = Math.random().toString(36).slice(-10) + "A1!"; // Auto-generate secure password
+            const randomPassword = Math.random().toString(36).slice(-10) + "A1!";
             const hashedPassword = await bcrypt.hash(randomPassword, 10);
             user = await prisma.user.create({
                 data: { email: email.toLowerCase(), password: hashedPassword, name: name || "Google User" }
@@ -77,11 +80,11 @@ app.post('/api/auth/google', async (req, res) => {
         const jwtToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ token: jwtToken, name: user.name, id: user.id });
     } catch (error) {
-        console.error("Google Auth Error:", error);
         res.status(500).json({ error: "Google Authentication failed." });
     }
 });
 
+// --- CHAT SESSION ROUTES ---
 app.get('/api/sessions/:userId', async (req, res) => {
     try {
         const sessions = await prisma.chat.findMany({
@@ -111,60 +114,56 @@ app.get('/api/history/:sessionId', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to load history." }); }
 });
 
+// --- MAIN AI CHAT ROUTE ---
 app.post('/api/chat', async (req, res) => {
     try {
         const { message, userId, history, sessionId, mode } = req.body;
-        
+        if (!message) return res.status(400).json({ error: "Message is required" });
+
         const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const writingMode = mode || "Creative";
 
+        // Switching to 1.5-flash for better stability on free tier
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash",
-            systemInstruction: `You are an elite professional ghostwriter creating a custom GPT experience. Your job is to interview the user and write their book for them from start to finish.
-
-            CRITICAL DUAL-RESPONSE WORKFLOW:
-            Every single time you have enough detail to write a piece of the book, you MUST separate the "Book Content" from the "Chat Conversation" using specific tags.
-
-            FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
-
-            [START_DRAFT]
-            (Write the actual polished, beautifully crafted book paragraphs here, in the user's voice, matching the ${writingMode} style.)
-            [END_DRAFT]
-
-            (Write your friendly chat response and ask your NEXT specific interview question here, outside the tags. E.g., "I've drafted that memory. Now, can we dig deeper into...")
-
-            STRICT RULES:
-            1. VOICE: Capture the user's unique tone.
-            2. DIG DEEPER: Ask for sensory details (smells, sounds, feelings).
-            3. ONE QUESTION: Never ask multiple questions at once. Give them space to think.
-            4. USE TAGS: If you write book content, ALWAYS wrap it in [START_DRAFT] and [END_DRAFT]. The system uses this to automatically build their manuscript.
-            5. ONLY SPEAK ENGLISH.`
+            model: "gemini-1.5-flash",
+            systemInstruction: `You are an elite professional ghostwriter creating a custom GPT experience. Your job is to interview the user and write their book for them from start to finish. Mode: ${writingMode}.
+            
+            FORMAT RULES:
+            - Separate Book Content using [START_DRAFT] and [END_DRAFT] tags.
+            - Ask only ONE specific interview question at a time.
+            - Only speak English.`
         });
 
-        const formattedHistory = (history || []).map(h => ({
-            role: h.role === 'user' ? 'user' : 'model',
-            parts: [{ text: h.text }]
-        }));
+        // Clean and format history to prevent API errors
+        const formattedHistory = (history || [])
+            .filter(h => h.text && h.text.trim() !== "")
+            .map(h => ({
+                role: h.role === 'user' ? 'user' : 'model',
+                parts: [{ text: h.text }]
+            }));
 
         const chat = model.startChat({ history: formattedHistory });
         const result = await chat.sendMessage(message);
-        const reply = await result.response.text();
+        const reply = result.response.text();
 
-        // Sirf database mein tab save karo jab user Login ho
+        // Save to DB only if user is logged in
         if (userId) {
             await prisma.chat.createMany({
                 data: [
                     { content: message, role: 'user', userId, sessionId: currentSessionId },
                     { content: reply, role: 'ai', userId, sessionId: currentSessionId }
                 ]
-            });
+            }).catch(e => console.error("Database Save Error:", e));
         }
 
         res.json({ reply, sessionId: currentSessionId });
+
     } catch (error) { 
-        res.status(500).json({ error: "Muse is taking a break." }); 
+        console.error("AI CHAT ERROR:", error.message);
+        res.status(500).json({ error: "Muse is taking a break.", details: error.message }); 
     }
 });
 
+// Render dynamic port or default 5000
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Muse Server live on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Muse Server live on port ${PORT}`));
