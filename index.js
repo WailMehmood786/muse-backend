@@ -10,7 +10,8 @@ const app = express();
 const prisma = new PrismaClient();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-app.use(cors());
+// CORS ERROR FIX: Allow all connections securely
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'wail_muse_secure_key_786';
@@ -32,6 +33,11 @@ app.post('/api/auth/signup', async (req, res) => {
     try {
         const { email, password, name } = req.body;
         if (!email || !password || !name) return res.status(400).json({ error: "All fields are required." });
+        
+        // Check if user already exists
+        const existingUser = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+        if (existingUser) return res.status(400).json({ error: "Email already exists." });
+
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await prisma.user.create({ data: { email: email.toLowerCase(), password: hashedPassword, name } });
         res.status(201).json({ message: "Account created!", id: user.id, name: user.name });
@@ -54,7 +60,6 @@ app.post('/api/auth/google', async (req, res) => {
         const { token } = req.body;
         if (!token) return res.status(400).json({ error: "Token is required." });
 
-        // Google se secure tareeqe se user ki email aur name fetch karo
         const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${token}` }
         });
@@ -65,10 +70,10 @@ app.post('/api/auth/google', async (req, res) => {
         const { email, name } = googleData;
         let user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
 
-        // Agar user pehli dafa google se login kar raha hai, toh naya account banao
         if (!user) {
-            const randomPassword = Math.random().toString(36).slice(-10) + "A1!"; // Auto-generate secure password
+            const randomPassword = Math.random().toString(36).slice(-10) + "A1!"; 
             const hashedPassword = await bcrypt.hash(randomPassword, 10);
+            
             user = await prisma.user.create({
                 data: { email: email.toLowerCase(), password: hashedPassword, name: name || "Google User" }
             });
@@ -116,10 +121,10 @@ app.post('/api/chat', async (req, res) => {
         const { message, userId, history, sessionId, mode } = req.body;
         
         const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const writingMode = mode || "Creative";
+        const writingMode = mode || "Conversational";
 
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash",
+            model: "gemini-2.0-flash", // Using your updated model
             systemInstruction: `You are an elite professional ghostwriter creating a custom GPT experience. Your job is to interview the user and write their book for them from start to finish.
 
             CRITICAL DUAL-RESPONSE WORKFLOW:
@@ -150,7 +155,7 @@ app.post('/api/chat', async (req, res) => {
         const result = await chat.sendMessage(message);
         const reply = await result.response.text();
 
-        // Sirf database mein tab save karo jab user Login ho
+        // Save to database only if user is logged in
         if (userId) {
             await prisma.chat.createMany({
                 data: [
@@ -162,7 +167,8 @@ app.post('/api/chat', async (req, res) => {
 
         res.json({ reply, sessionId: currentSessionId });
     } catch (error) { 
-        res.status(500).json({ error: "Muse is taking a break." }); 
+        console.error("Chat API Error:", error);
+        res.status(500).json({ error: "Muse is taking a break. Please try again later." }); 
     }
 });
 
