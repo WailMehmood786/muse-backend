@@ -8,7 +8,13 @@ require('dotenv').config();
 
 const app = express();
 const prisma = new PrismaClient();
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+// Safe Gemini Initialization
+const apiKey = process.env.GEMINI_API_KEY || "DUMMY_KEY";
+if (apiKey === "DUMMY_KEY") {
+    console.error("❌ ERROR: GEMINI_API_KEY is missing in environment variables!");
+}
+const genAI = new GoogleGenerativeAI(apiKey);
 
 app.use(cors());
 app.use(express.json());
@@ -54,20 +60,17 @@ app.post('/api/auth/google', async (req, res) => {
         const { token } = req.body;
         if (!token) return res.status(400).json({ error: "Token is required." });
 
-        // Google se secure tareeqe se user ki email aur name fetch karo
         const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${token}` }
         });
         const googleData = await googleRes.json();
-
         if (!googleData.email) return res.status(400).json({ error: "Invalid Google Token." });
 
         const { email, name } = googleData;
         let user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
 
-        // Agar user pehli dafa google se login kar raha hai, toh naya account banao
         if (!user) {
-            const randomPassword = Math.random().toString(36).slice(-10) + "A1!"; // Auto-generate secure password
+            const randomPassword = Math.random().toString(36).slice(-10) + "A1!"; 
             const hashedPassword = await bcrypt.hash(randomPassword, 10);
             user = await prisma.user.create({
                 data: { email: email.toLowerCase(), password: hashedPassword, name: name || "Google User" }
@@ -76,10 +79,7 @@ app.post('/api/auth/google', async (req, res) => {
 
         const jwtToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ token: jwtToken, name: user.name, id: user.id });
-    } catch (error) {
-        console.error("Google Auth Error:", error);
-        res.status(500).json({ error: "Google Authentication failed." });
-    }
+    } catch (error) { res.status(500).json({ error: "Google Authentication failed." }); }
 });
 
 app.get('/api/sessions/:userId', async (req, res) => {
@@ -111,60 +111,79 @@ app.get('/api/history/:sessionId', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to load history." }); }
 });
 
+// --- MAIN AI CHAT ROUTE (MASTER FIX) ---
 app.post('/api/chat', async (req, res) => {
     try {
         const { message, userId, history, sessionId, mode } = req.body;
-        
+        if (!message) return res.status(400).json({ error: "Message is required" });
+
         const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const writingMode = mode || "Creative";
 
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash",
+            model: "gemini-2.0-flash", // Stable Free Tier Model
             systemInstruction: `You are an elite professional ghostwriter creating a custom GPT experience. Your job is to interview the user and write their book for them from start to finish.
-
             CRITICAL DUAL-RESPONSE WORKFLOW:
             Every single time you have enough detail to write a piece of the book, you MUST separate the "Book Content" from the "Chat Conversation" using specific tags.
-
             FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
-
             [START_DRAFT]
             (Write the actual polished, beautifully crafted book paragraphs here, in the user's voice, matching the ${writingMode} style.)
             [END_DRAFT]
-
-            (Write your friendly chat response and ask your NEXT specific interview question here, outside the tags. E.g., "I've drafted that memory. Now, can we dig deeper into...")
-
+            (Write your friendly chat response and ask your NEXT specific interview question here, outside the tags.)
             STRICT RULES:
             1. VOICE: Capture the user's unique tone.
             2. DIG DEEPER: Ask for sensory details (smells, sounds, feelings).
             3. ONE QUESTION: Never ask multiple questions at once. Give them space to think.
-            4. USE TAGS: If you write book content, ALWAYS wrap it in [START_DRAFT] and [END_DRAFT]. The system uses this to automatically build their manuscript.
+            4. USE TAGS: ALWAYS wrap book content in [START_DRAFT] and [END_DRAFT].
             5. ONLY SPEAK ENGLISH.`
         });
 
-        const formattedHistory = (history || []).map(h => ({
-            role: h.role === 'user' ? 'user' : 'model',
-            parts: [{ text: h.text }]
-        }));
+        // --- ANTI-CRASH HISTORY FILTER ---
+        let rawHistory = (history || [])
+            .map(h => ({
+                role: h.role === 'ai' || h.role === 'model' ? 'model' : 'user',
+                text: h.text || ""
+            }))
+            .filter(h => h.text.trim() !== "");
 
-        const chat = model.startChat({ history: formattedHistory });
+        let validHistory = [];
+        let lastRole = null;
+        
+        // Merge consecutive messages to strictly alternate user->model->user->model
+        for (const msg of rawHistory) {
+            if (msg.role !== lastRole) {
+                validHistory.push({ role: msg.role, parts: [{ text: msg.text }] });
+                lastRole = msg.role;
+            } else {
+                validHistory[validHistory.length - 1].parts[0].text += `\n\n${msg.text}`;
+            }
+        }
+
+        // Gemini API throws an error if history ends with 'user' because sendMessage implies another 'user'
+        if (validHistory.length > 0 && validHistory[validHistory.length - 1].role === 'user') {
+            validHistory.pop();
+        }
+        // ----------------------------------
+
+        const chat = model.startChat({ history: validHistory });
         const result = await chat.sendMessage(message);
-        const reply = await result.response.text();
+        const reply = result.response.text();
 
-        // Sirf database mein tab save karo jab user Login ho
         if (userId) {
             await prisma.chat.createMany({
                 data: [
                     { content: message, role: 'user', userId, sessionId: currentSessionId },
                     { content: reply, role: 'ai', userId, sessionId: currentSessionId }
                 ]
-            });
+            }).catch(e => console.error("DB Save Warning:", e));
         }
 
         res.json({ reply, sessionId: currentSessionId });
     } catch (error) { 
-        res.status(500).json({ error: "Muse is taking a break." }); 
+        console.error("🔥 AI CHAT ERROR:", error.message);
+        res.status(500).json({ error: "Muse is taking a break.", details: error.message }); 
     }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Muse Server live on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Muse Server live on port ${PORT}`));
