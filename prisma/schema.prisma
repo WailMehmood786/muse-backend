@@ -18,12 +18,13 @@ model User {
 
 model Chat {
   id        String   @id @default(uuid())
-  content   String   
+  content   String   @db.Text
   role      String
   userId    String
   sessionId String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
-
+  
   @@index([userId])
+  @@index([sessionId])
 }

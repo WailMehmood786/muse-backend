@@ -1,31 +1,40 @@
 {
-  "name": "server",
+  "name": "muse-backend",
   "version": "1.0.0",
   "description": "",
+  "homepage": "https://github.com/WailMehmood786/muse-backend#readme",
+  "bugs": {
+    "url": "https://github.com/WailMehmood786/muse-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WailMehmood786/muse-backend.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "postinstall": "chmod +x ./node_modules/.bin/prisma && npx prisma generate"
+    "dev": "nodemon index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
     "@prisma/client": "^6.19.2",
-    "axios": "^1.13.6",
+    "@react-oauth/google": "^0.13.4",
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^4.22.1",
+    "express-session": "^1.19.0",
     "groq-sdk": "^0.37.0",
     "jsonwebtoken": "^9.0.3",
-    "jspdf": "^4.2.0",
-    "mongoose": "^9.2.3",
-    "mysql2": "^3.18.2",
-    "openai": "^6.25.0",
-    "pg": "^8.19.0",
+    "jwt-decode": "^4.0.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
     "prisma": "^6.19.2"
   }
 }
