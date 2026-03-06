@@ -32,7 +32,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'muse-secret-key',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false } // Set to true in production with HTTPS
+  cookie: { secure: false }
 }));
 
 // Initialize Passport
@@ -57,7 +57,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     callbackURL: "/auth/google/callback"
   }, async (accessToken, refreshToken, profile, done) => {
     try {
-      // Find or create user
       let user = global.users.find(u => u.googleId === profile.id);
       
       if (!user) {
@@ -67,7 +66,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           email: profile.emails[0].value,
           name: profile.displayName,
           avatar: profile.photos[0]?.value || null,
-          role: 'publisher', // Default role
+          role: 'publisher',
           createdAt: new Date().toISOString(),
           lastLogin: new Date().toISOString()
         };
@@ -75,7 +74,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         global.users.push(user);
         console.log(`✅ New user created: ${user.email}`);
       } else {
-        // Update last login
         user.lastLogin = new Date().toISOString();
         console.log(`✅ User logged in: ${user.email}`);
       }
@@ -108,66 +106,100 @@ app.get('/', (req, res) => {
   res.send("🚀 Muse Backend is Online!");
 });
 
-// --- DYNAMIC INTERVIEWER SYSTEM PROMPT ---
+// --- IMPROVED INTERVIEWER SYSTEM PROMPT ---
 const getInterviewerPrompt = (sport) => {
   const sportName = sport.charAt(0).toUpperCase() + sport.slice(1);
+  
+  // Sport-specific terms
+  const sportTerms = {
+    baseball: { equipment: 'bat', action: 'hit', position: 'pitcher' },
+    basketball: { equipment: 'ball', action: 'shoot', position: 'point guard' },
+    football: { equipment: 'ball', action: 'throw', position: 'quarterback' },
+    cricket: { equipment: 'bat', action: 'bowl', position: 'bowler' },
+    default: { equipment: 'equipment', action: 'play', position: 'position' }
+  };
+  
+  const terms = sportTerms[sport.toLowerCase()] || sportTerms.default;
 
-  return `You are an expert biography interviewer conducting a one-on-one interview with a ${sportName} athlete to write their autobiography.
+  return `You are Kelly Cole, a professional biography interviewer. You're talking with a ${sportName} athlete about their life story for their autobiography.
 
-YOUR MISSION:
-Write their book for them in THEIR voice by asking direct questions, digging deeper, and naturally guiding the conversation from start to finish.
+ABSOLUTE RULES - NEVER BREAK:
+❌ NEVER say "What does that mean to you?" - BANNED
+❌ NEVER say "That's interesting" - BANNED
+❌ NEVER say "Tell me more" without being specific - BANNED
+❌ NEVER say "Who are you today?" - BANNED
+❌ NEVER ask about "book", "story", "protagonist", "genre" - BANNED
+❌ NEVER ignore what they just said - BANNED
+❌ NEVER ask generic therapy questions - BANNED
 
-CRITICAL RULES - FOLLOW EXACTLY:
-❌ NEVER EVER say "Who are you today?"
-❌ NEVER EVER say "Start with a quick intro"
-❌ NEVER EVER say "Thanks. Start with..."
-❌ NEVER ask about "protagonist", "antagonist", "book structure", "genre", "theme"
-❌ NEVER ask "What genre of book would you like to write?"
-❌ NEVER use [START_DRAFT] or [END_DRAFT] tags
-❌ NEVER repeat the same question to different people
-❌ NEVER use pre-written template questions
+✅ ALWAYS reference their EXACT words in your response
+✅ ALWAYS ask about specific details they mentioned
+✅ ALWAYS keep it under 10 words
+✅ ALWAYS be natural like a friend talking
 
-✅ ALWAYS respond to what THEY just said
-✅ ALWAYS ask natural follow-up questions
-✅ ALWAYS keep responses under 15 words
-✅ ALWAYS be conversational and authentic
+RESPONSE FORMULA:
+1. Short reaction (2-3 words): "Wow", "Damn", "For real?", "No way", "That's crazy"
+2. ONE specific question using THEIR words (5-7 words)
 
-INTERVIEW STYLE:
-1. Listen to what they say
-2. React naturally: "Wow", "That's powerful", "I hear you", "Gotcha"
-3. Ask ONE short follow-up question based on their response
-4. Dig deeper: "Tell me more", "What happened next?", "How did that feel?"
-5. Guide them through their life story naturally
+EXAMPLES - LEARN FROM THESE:
 
-RESPONSE FORMAT:
-[Short reaction]. [One brief question]?
+They say: "I grew up in Chicago"
+✅ CORRECT: "Chicago. South Side or North Side?"
+✅ CORRECT: "Chicago. What was your block like?"
+❌ WRONG: "What does that mean to you?"
+❌ WRONG: "That's interesting. Tell me more."
 
-CORRECT EXAMPLES:
-✅ "Wow. Where did you grow up?"
-✅ "That's tough. How did you handle it?"
-✅ "I hear you. Tell me about your family."
-✅ "Gotcha. What happened next?"
-✅ "That's powerful. How did that shape you?"
+They say: "My mom raised seven kids alone"
+✅ CORRECT: "Seven kids. Where were you in line?"
+✅ CORRECT: "Alone. What happened to your dad?"
+❌ WRONG: "That's interesting."
+❌ WRONG: "Tell me more about that."
 
-WRONG EXAMPLES (NEVER USE):
-❌ "Thanks. Start with a quick intro. Who are you today?"
-❌ "Who are you today?"
-❌ "What genre of book would you like to write?"
-❌ "What is the main theme or idea?"
-❌ "Who or what opposes the protagonist?"
-❌ "Let's dive into the story."
+They say: "I started playing ${sportName} at 7"
+✅ CORRECT: "Seven years old. Who got you into it?"
+✅ CORRECT: "That's young. What drew you to ${sportName}?"
+❌ WRONG: "What does that mean to you?"
 
-WHAT TO EXPLORE (Ask naturally based on their responses):
-- Early life and family background
-- First experiences with ${sportName}
-- Key mentors, coaches, influences
-- Turning points and challenges
-- Career highlights and struggles
-- Personal relationships and family
-- Life lessons and wisdom
-- Legacy and what they want to be remembered for
+They say: "My coach believed in me"
+✅ CORRECT: "What did your coach see in you?"
+✅ CORRECT: "Tell me about your coach."
+❌ WRONG: "That's interesting."
 
-REMEMBER: This is a REAL PERSON telling their REAL LIFE STORY. Not a fictional book. Ask about THEIR life, not about characters or plot.`;
+They say: "We didn't have much money"
+✅ CORRECT: "How tough was it?"
+✅ CORRECT: "How did that affect you?"
+❌ WRONG: "What does that mean to you?"
+
+They say: "I got injured my senior year"
+✅ CORRECT: "What happened?"
+✅ CORRECT: "How bad was the injury?"
+❌ WRONG: "Tell me more."
+
+They say: "bilkul" or short response
+✅ CORRECT: "Okay. So where'd you grow up?"
+✅ CORRECT: "Got it. Tell me about your family."
+❌ WRONG: "What does that mean to you?"
+
+CONVERSATION FLOW:
+Start → "Hey, let's start simple. Where'd you grow up?"
+Family → "Tell me about your family."
+Childhood → "What kind of kid were you?"
+Sports Start → "When'd you first pick up a ${terms.equipment}?"
+Development → "Who pushed you to get better?"
+High School → "Talk about high school ${sportName}."
+Challenges → "What was your toughest moment?"
+Success → "What's your proudest achievement?"
+Now → "What are you up to now?"
+Legacy → "What do you want remembered?"
+
+KEY RULES:
+1. Use THEIR exact words in your question
+2. Ask about specific details they mentioned
+3. Keep it conversational and brief
+4. One question at a time
+5. React naturally first, then ask
+
+REMEMBER: You're having a REAL conversation about THEIR REAL life. Listen to what they say and ask about THAT specific thing. No generic questions!`;
 };
 
 // --- AUTHENTICATION MIDDLEWARE ---
@@ -198,7 +230,6 @@ app.post('/api/publisher/login', async (req, res) => {
       return res.status(400).json({ error: 'Password required' });
     }
     
-    // Get password from environment variable (NOT in code)
     const correctPassword = process.env.PUBLISHER_PASSWORD;
     
     if (!correctPassword) {
@@ -206,12 +237,10 @@ app.post('/api/publisher/login', async (req, res) => {
       return res.status(500).json({ error: 'Server configuration error' });
     }
     
-    // Verify password
     if (password !== correctPassword) {
       return res.status(401).json({ error: 'Invalid password' });
     }
     
-    // Generate JWT token
     const token = jwt.sign(
       { 
         id: 'publisher_1', 
@@ -253,8 +282,6 @@ app.get('/api/publisher/verify', verifyToken, (req, res) => {
   });
 });
 
-// --- AUTHENTICATION ROUTES ---
-
 // Google OAuth - Initiate
 app.get('/auth/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })
@@ -268,7 +295,6 @@ app.get('/auth/google/callback',
   }),
   (req, res) => {
     try {
-      // Generate JWT token
       const token = jwt.sign(
         { 
           id: req.user.id, 
@@ -280,7 +306,6 @@ app.get('/auth/google/callback',
         { expiresIn: '7d' }
       );
       
-      // Redirect to frontend with token
       const frontendUrl = process.env.FRONTEND_URL || 'https://muse-frontend-three.vercel.app';
       res.redirect(`${frontendUrl}?token=${token}`);
     } catch (error) {
@@ -322,7 +347,7 @@ app.post('/api/logout', (req, res) => {
   });
 });
 
-// Email/Password Registration (Optional)
+// Email/Password Registration
 app.post('/api/register', async (req, res) => {
   try {
     const { email, password, name } = req.body;
@@ -331,16 +356,13 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({ error: 'All fields required' });
     }
     
-    // Check if user exists
     const existingUser = global.users.find(u => u.email === email);
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
     }
     
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    // Create user
     const user = {
       id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       email,
@@ -353,7 +375,6 @@ app.post('/api/register', async (req, res) => {
     
     global.users.push(user);
     
-    // Generate token
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, role: user.role },
       process.env.JWT_SECRET || 'muse-jwt-secret',
@@ -376,7 +397,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Email/Password Login (Optional)
+// Email/Password Login
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -385,24 +406,20 @@ app.post('/api/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password required' });
     }
     
-    // Find user
     const user = global.users.find(u => u.email === email && u.password);
     
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    // Verify password
     const isValid = await bcrypt.compare(password, user.password);
     
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    // Update last login
     user.lastLogin = new Date().toISOString();
     
-    // Generate token
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, role: user.role },
       process.env.JWT_SECRET || 'muse-jwt-secret',
@@ -427,7 +444,7 @@ app.post('/api/login', async (req, res) => {
 
 // --- CLIENT MANAGEMENT ROUTES ---
 
-// Create new client (Protected)
+// Create new client
 app.post('/api/clients', verifyToken, (req, res) => {
   try {
     const { name, email, bookTitle, sport, publisherId } = req.body;
@@ -528,17 +545,16 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const athleteSport = (sport || "baseball").toLowerCase();
-    console.log(`📝 Interview - Sport: ${athleteSport}`);
+    console.log(`📝 Interview - Sport: ${athleteSport}, Message: "${message}"`);
 
-    // Get interviewer-style prompt
+    // Get improved interviewer prompt
     const systemPrompt = getInterviewerPrompt(athleteSport);
 
     let apiMessages = [{ role: "system", content: systemPrompt }];
 
-    // Add conversation history (last 10 messages for context)
+    // Add ALL conversation history for better context
     if (history && history.length > 0) {
-      const recentHistory = history.slice(-10);
-      recentHistory.forEach(h => {
+      history.forEach(h => {
         if (h.text || h.content) {
           apiMessages.push({
             role: h.role === 'ai' || h.role === 'assistant' ? 'assistant' : 'user',
@@ -551,50 +567,81 @@ app.post('/api/chat', async (req, res) => {
     // Add current message
     apiMessages.push({ role: "user", content: message });
 
-    // Call Groq API
+    // Call Groq API with adjusted parameters
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: apiMessages,
-      temperature: 0.6, // Lower for more consistent style
-      max_tokens: 60, // Shorter responses
-      top_p: 0.85,
-      frequency_penalty: 0.3, // Reduce repetition
-      presence_penalty: 0.2
+      temperature: 0.7, // Slightly higher for more natural responses
+      max_tokens: 50, // Shorter for concise questions
+      top_p: 0.9,
+      frequency_penalty: 0.5, // Higher to avoid repetition
+      presence_penalty: 0.3
     });
 
     let reply = completion.choices[0].message.content.trim();
     
-    // Remove ALL bad patterns aggressively
-    reply = reply.replace(/^Thanks\.\s*/gi, '');
-    reply = reply.replace(/Start with a quick intro\.?\s*/gi, '');
-    reply = reply.replace(/Who are you today\??\s*/gi, '');
-    reply = reply.replace(/Let's dive into the story\.?\s*/gi, '');
-    reply = reply.replace(/What genre of book.*?\?/gi, '');
-    reply = reply.replace(/What is the main theme.*?\?/gi, '');
-    reply = reply.replace(/Who or what opposes.*?\?/gi, '');
-    reply = reply.replace(/\[START_DRAFT\]/gi, '');
-    reply = reply.replace(/\[END_DRAFT\]/gi, '');
+    // Aggressive filtering of bad patterns
+    const badPatterns = [
+      /^Thanks\.\s*/gi,
+      /Start with a quick intro\.?\s*/gi,
+      /Who are you today\??\s*/gi,
+      /Let's dive into the story\.?\s*/gi,
+      /What genre of book.*?\?/gi,
+      /What is the main theme.*?\?/gi,
+      /Who or what opposes.*?\?/gi,
+      /What does that mean to you\??\s*/gi,
+      /That's interesting\.?\s*/gi,
+      /Tell me more\.?\s*$/gi,
+      /\[START_DRAFT\]/gi,
+      /\[END_DRAFT\]/gi
+    ];
+    
+    badPatterns.forEach(pattern => {
+      reply = reply.replace(pattern, '');
+    });
+    
+    // Replace bad words
     reply = reply.replace(/protagonist/gi, 'you');
     reply = reply.replace(/antagonist/gi, 'challenge');
     
-    // If reply is still bad, use a safe default
-    const badPhrases = ['who are you', 'start with', 'genre', 'protagonist', 'theme', 'main idea'];
-    const hasBadPhrase = badPhrases.some(phrase => reply.toLowerCase().includes(phrase));
+    // Check for remaining bad phrases
+    const badPhrases = [
+      'what does that mean',
+      'that\'s interesting',
+      'tell me more',
+      'who are you',
+      'start with',
+      'genre',
+      'protagonist',
+      'theme',
+      'main idea',
+      'book',
+      'story'
+    ];
     
+    const lowerReply = reply.toLowerCase();
+    const hasBadPhrase = badPhrases.some(phrase => lowerReply.includes(phrase));
+    
+    // If still bad or too short, use contextual fallback
     if (hasBadPhrase || reply.length < 5) {
-      reply = "Tell me more about that.";
+      // Generate better fallback based on message length
+      if (message.length < 10) {
+        reply = "Okay. So where'd you grow up?";
+      } else {
+        reply = "Got it. What happened next?";
+      }
     }
     
-    // Keep it conversational but brief
+    // Keep it brief - max 2 sentences
     const sentences = reply.split(/[.!?]+/).filter(s => s.trim().length > 0);
     if (sentences.length > 2) {
       reply = sentences.slice(0, 2).join('. ') + '.';
     }
     
-    // If still too long (over 100 chars), trim it
-    if (reply.length > 100) {
+    // Trim if too long
+    if (reply.length > 80) {
       const words = reply.split(' ');
-      reply = words.slice(0, 12).join(' ') + '?';
+      reply = words.slice(0, 10).join(' ') + '?';
     }
 
     console.log(`✅ Interviewer: ${reply}`);
@@ -615,6 +662,6 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Muse Server live on port ${PORT}`);
   console.log(`📍 Production: https://muse-backend-production-29cd.up.railway.app`);
-  console.log(`🎯 Interview-style AI ready`);
+  console.log(`🎯 Improved interview AI ready`);
   console.log(`💾 Using in-memory storage`);
 });
