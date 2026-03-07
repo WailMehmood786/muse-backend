@@ -303,7 +303,6 @@ REMEMBER:
 
 Keep it natural. Keep it brief. Keep it POWERFUL.`;
 };
-};
 
 // --- AUTHENTICATION MIDDLEWARE ---
 const verifyToken = (req, res, next) => {
