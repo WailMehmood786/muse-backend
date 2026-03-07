@@ -127,50 +127,84 @@ app.get('/', (req, res) => {
   res.send("🚀 Muse Backend Online!");
 });
 
-// ========== SIMPLE POWERFUL INTERVIEWER ==========
+// ========== NATURAL CONVERSATIONAL INTERVIEWER ==========
 const getInterviewerPrompt = (sport) => {
   const sportName = sport.charAt(0).toUpperCase() + sport.slice(1);
   
-  return `You're interviewing a ${sportName} athlete for their book. Be natural and brief.
+  return `You are a warm, empathetic interviewer talking to a ${sportName} athlete about their life story for a book.
 
-STYLE: React (1-2 words) + Ask ONE question. Under 10 words total.
+YOUR STYLE:
+- Have a natural conversation like a friend
+- React to what they say with empathy
+- Ask follow-up questions based on their answers
+- Keep responses conversational (10-15 words)
+- Show genuine interest
 
-EXAMPLES:
-"I grew up poor"
-→ "How poor? What did that look like?"
+CONVERSATION EXAMPLES:
 
-"My dad left at 10"
-→ "Ten... What do you remember?"
+User: "Hello"
+You: "Hey! Thanks for sitting down with me. Where did you grow up?"
 
-"I got injured"
-→ "Oh no. How did you deal with it?"
+User: "I'm fine and you"
+You: "I'm great! Let's dive in. Tell me about your childhood."
 
-"Coach believed in me"
-→ "Powerful. What did they see in you?"
+User: "I grew up in Texas"
+You: "Texas! What was it like growing up there?"
 
-"Made it to pros"
-→ "Amazing! Who did you tell first?"
+User: "It was tough, we didn't have much money"
+You: "That sounds challenging. How did that shape who you are today?"
 
-QUESTIONS TO ASK:
+User: "My dad left when I was young"
+You: "I'm sorry to hear that. How old were you when he left?"
+
+User: "I was 10"
+You: "Ten years old... that must have been really hard. How did you cope?"
+
+User: "I got into ${sportName}"
+You: "Ah, ${sportName} became your outlet. What drew you to it?"
+
+User: "My coach believed in me"
+You: "That's powerful. What did your coach see in you that others didn't?"
+
+User: "I made it to the pros"
+You: "That's incredible! What went through your mind when you got the call?"
+
+User: "I'm sharing my story"
+You: "I'm here to listen. What's the most important part of your journey?"
+
+QUESTION TYPES TO USE:
+
+OPENING QUESTIONS:
 - "Where did you grow up?"
-- "When did you discover ${sportName}?"
+- "What was your childhood like?"
+- "When did you first discover ${sportName}?"
+
+DEEP QUESTIONS:
 - "What was your biggest challenge?"
-- "How did that feel?"
-- "What kept you going?"
-- "Who believed in you?"
-- "What did that teach you?"
+- "How did that make you feel?"
+- "What kept you going during tough times?"
+- "Who believed in you when others didn't?"
+- "What moment changed everything for you?"
+
+FOLLOW-UP QUESTIONS:
+- "Tell me more about that."
+- "How did that shape you?"
+- "What did you learn from that experience?"
+- "What would you tell your younger self?"
 
 RULES:
-✅ React + ask (under 10 words)
-✅ Use their words
-✅ One question only
-✅ Natural, brief
+✅ Be conversational and natural
+✅ React with empathy ("That's tough", "I hear you", "That's powerful")
+✅ Ask ONE clear question per response
+✅ Keep it 10-15 words
+✅ Build on what they just said
 
-❌ No "interesting" or "tell me more"
-❌ No book/genre questions
-❌ No long responses
+❌ Don't just say one word like "Who?" or "How?"
+❌ Don't ask about book structure or genre
+❌ Don't be robotic or formal
+❌ Don't ignore what they just told you
 
-Keep it real. Keep it short.`;
+REMEMBER: You're having a real conversation, not interrogating. Listen, react, then ask.`;
 };
 
 // Auth Middleware
@@ -194,6 +228,7 @@ app.post('/api/publisher/login', async (req, res) => {
     
     const correctPassword = process.env.PUBLISHER_PASSWORD;
     if (!correctPassword) return res.status(500).json({ error: 'Server config error' });
+    
     if (password !== correctPassword) return res.status(401).json({ error: 'Invalid password' });
     
     const token = jwt.sign(
@@ -364,7 +399,6 @@ app.post('/api/clients', verifyToken, async (req, res) => {
     
     // Update with unique link
     const uniqueLink = `${frontendUrl}/interview/${client.id}?name=${encodeURIComponent(name)}&book=${encodeURIComponent(bookTitle)}&sport=${client.sport}`;
-    
     const updatedClient = await prisma.client.update({
       where: { id: client.id },
       data: { uniqueLink }
@@ -408,11 +442,9 @@ app.get('/api/clients/:clientId', async (req, res) => {
     
     // Check authorization
     const token = req.headers.authorization?.split(' ')[1];
-    
     if (token) {
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'muse-jwt-secret');
-        
         // Publisher can see all clients
         if (decoded.role === 'publisher') {
           return res.json({ success: true, client });
@@ -442,11 +474,9 @@ app.put('/api/clients/:clientId', async (req, res) => {
     
     // Check authorization
     const token = req.headers.authorization?.split(' ')[1];
-    
     if (token) {
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'muse-jwt-secret');
-        
         // Publisher can update any client
         if (decoded.role === 'publisher') {
           const client = await prisma.client.update({
@@ -497,17 +527,18 @@ app.delete('/api/clients/:clientId', verifyToken, async (req, res) => {
   }
 });
 
-// ========== AI CHAT ==========
+// ========== AI CHAT (NATURAL CONVERSATION) ==========
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, userId, history, sport } = req.body;
+    const { message, history, sport } = req.body;
     if (!message) return res.status(400).json({ error: "Message required" });
-    
+
     const athleteSport = (sport || "baseball").toLowerCase();
     const systemPrompt = getInterviewerPrompt(athleteSport);
-    
+
     let apiMessages = [{ role: "system", content: systemPrompt }];
-    
+
+    // Add conversation history
     if (history && history.length > 0) {
       history.forEach(h => {
         if (h.text || h.content) {
@@ -518,69 +549,56 @@ app.post('/api/chat', async (req, res) => {
         }
       });
     }
-    
+
     apiMessages.push({ role: "user", content: message });
-    
+
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: apiMessages,
-      temperature: 0.7,
-      max_tokens: 50,
+      temperature: 0.75,  // Slightly higher for natural conversation
+      max_tokens: 80,     // Longer for complete sentences
       top_p: 0.9,
-      frequency_penalty: 0.8,
-      presence_penalty: 0.6
+      frequency_penalty: 0.5,  // Lower to allow natural repetition
+      presence_penalty: 0.4
     });
-    
+
     let reply = completion.choices[0].message.content.trim();
     
-    // Clean up bad patterns
+    // Clean up only really bad patterns
     const badPatterns = [
-      /^Thanks\.\s*/gi,
-      /Start with.*intro/gi,
-      /Who are you today/gi,
-      /Let's dive into/gi,
-      /What genre/gi,
-      /What.*theme/gi,
-      /That's interesting/gi,
-      /Tell me more\.?$/gi,
       /\[START_DRAFT\]/gi,
-      /\[END_DRAFT\]/gi
+      /\[END_DRAFT\]/gi,
+      /^Thanks\.\s*Start with/gi,
+      /Who are you today\?/gi
     ];
     
     badPatterns.forEach(pattern => {
       reply = reply.replace(pattern, '');
     });
     
-    reply = reply.replace(/protagonist/gi, 'you');
-    reply = reply.replace(/antagonist/gi, 'challenge');
-    
-    // Fallback if bad
-    if (reply.length < 5 || reply.toLowerCase().includes('genre') || reply.toLowerCase().includes('book')) {
+    // Fallback only if completely empty or too short
+    if (reply.length < 3) {
       if (message.length < 10) {
-        reply = "Where did you grow up?";
+        reply = "Hey! Thanks for being here. Where did you grow up?";
       } else {
-        reply = "How did that feel?";
+        reply = "That's interesting. Tell me more about that.";
       }
     }
     
-    // Keep brief
-    const sentences = reply.split(/[.!?]+/).filter(s => s.trim().length > 0);
-    if (sentences.length > 1) {
-      reply = sentences[0] + '?';
+    // Keep it reasonable length (not too strict)
+    if (reply.length > 150) {
+      const sentences = reply.split(/[.!?]+/).filter(s => s.trim().length > 0);
+      reply = sentences.slice(0, 2).join('. ') + '.';
     }
-    
-    if (reply.length > 80) {
-      const words = reply.split(' ');
-      reply = words.slice(0, 10).join(' ') + '?';
-    }
-    
+
     console.log(`✅ AI: ${reply}`);
     res.json({ reply });
+
   } catch (error) {
     console.error("Chat error:", error);
     res.status(500).json({ 
       error: "Chat failed",
-      reply: "Can you repeat that?"
+      reply: "Sorry, I had a connection issue. Can you repeat that?"
     });
   }
 });
@@ -605,3 +623,4 @@ app.listen(PORT, () => {
   console.log(`📍 https://muse-backend-production-29cd.up.railway.app`);
   console.log(`💾 Using Supabase PostgreSQL database`);
 });
+
