@@ -12,6 +12,31 @@ require('dotenv').config();
 const app = express();
 const prisma = new PrismaClient();
 
+// Initialize default publisher on startup
+async function initializeDefaultPublisher() {
+  try {
+    const existingPublisher = await prisma.user.findUnique({
+      where: { id: 'publisher_1' }
+    });
+    
+    if (!existingPublisher) {
+      await prisma.user.create({
+        data: {
+          id: 'publisher_1',
+          email: 'publisher@muse.com',
+          name: 'Publisher',
+          role: 'publisher'
+        }
+      });
+      console.log('✅ Default publisher created');
+    }
+  } catch (error) {
+    console.error('Error initializing publisher:', error);
+  }
+}
+
+initializeDefaultPublisher();
+
 // Initialize Groq AI
 let groq = null;
 if (process.env.GROQ_API_KEY) {
