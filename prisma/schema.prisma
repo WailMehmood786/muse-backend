@@ -9,22 +9,35 @@ generator client {
 }
 
 model User {
-  id       String  @id @default(uuid())
-  email    String  @unique
-  password String
-  name     String?
-  chats    Chat[]
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String?
+  name      String?
+  googleId  String?  @unique
+  avatar    String?
+  role      String   @default("publisher")
+  createdAt DateTime @default(now())
+  lastLogin DateTime @default(now())
+  clients   Client[]
 }
 
-model Chat {
-  id        String   @id @default(uuid())
-  content   String   @db.Text
-  role      String
-  userId    String
-  sessionId String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+model Client {
+  id         String   @id @default(uuid())
+  name       String
+  email      String
+  bookTitle  String
+  sport      String   @default("baseball")
+  uniqueLink String
+  publisherId String
+  publisher  User     @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+  sessionId  String?
+  lastActive DateTime @default(now())
+  status     String   @default("pending")
+  progress   Int      @default(0)
+  messages   Json     @default("[]")
+  bookDraft  String   @default("") @db.Text
+  wordCount  Int      @default(0)
+  createdAt  DateTime @default(now())
   
-  @@index([userId])
-  @@index([sessionId])
+  @@index([publisherId])
 }
