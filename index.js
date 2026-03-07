@@ -6,6 +6,8 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -23,9 +25,73 @@ if (process.env.GROQ_API_KEY) {
   console.log('⚠️  AI service not configured');
 }
 
-// In-memory storage
-global.clients = [];
-global.users = [];
+// ========== PERSISTENT FILE-BASED STORAGE ==========
+const DATA_DIR = path.join(__dirname, 'data');
+const CLIENTS_FILE = path.join(DATA_DIR, 'clients.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+// Create data directory if it doesn't exist
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  console.log('✅ Data directory created');
+}
+
+// Load data from files
+function loadData() {
+  try {
+    if (fs.existsSync(CLIENTS_FILE)) {
+      const data = fs.readFileSync(CLIENTS_FILE, 'utf8');
+      global.clients = JSON.parse(data);
+      console.log(`✅ Loaded ${global.clients.length} clients from storage`);
+    } else {
+      global.clients = [];
+      saveClients();
+    }
+  } catch (error) {
+    console.error('Error loading clients:', error);
+    global.clients = [];
+  }
+
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const data = fs.readFileSync(USERS_FILE, 'utf8');
+      global.users = JSON.parse(data);
+      console.log(`✅ Loaded ${global.users.length} users from storage`);
+    } else {
+      global.users = [];
+      saveUsers();
+    }
+  } catch (error) {
+    console.error('Error loading users:', error);
+    global.users = [];
+  }
+}
+
+// Save data to files
+function saveClients() {
+  try {
+    fs.writeFileSync(CLIENTS_FILE, JSON.stringify(global.clients, null, 2));
+  } catch (error) {
+    console.error('Error saving clients:', error);
+  }
+}
+
+function saveUsers() {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(global.users, null, 2));
+  } catch (error) {
+    console.error('Error saving users:', error);
+  }
+}
+
+// Initialize storage
+loadData();
+
+// Auto-save every 30 seconds
+setInterval(() => {
+  saveClients();
+  saveUsers();
+}, 30000);
 
 // Session middleware
 app.use(session({
@@ -72,9 +138,11 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         };
         
         global.users.push(user);
+        saveUsers();
         console.log(`✅ New user created: ${user.email}`);
       } else {
         user.lastLogin = new Date().toISOString();
+        saveUsers();
         console.log(`✅ User logged in: ${user.email}`);
       }
       
@@ -110,127 +178,131 @@ app.get('/', (req, res) => {
 const getPowerfulInterviewerPrompt = (sport) => {
   const sportName = sport.charAt(0).toUpperCase() + sport.slice(1);
 
-  return `You are a master biography interviewer. Your mission: Extract DEEP, EMOTIONAL stories from a ${sportName} athlete to write their powerful autobiography.
+  return `You are a master biography interviewer having a NATURAL CONVERSATION with a ${sportName} athlete. Your mission: Extract DEEP, EMOTIONAL stories to write their powerful autobiography.
 
-🎯 YOUR GOAL: Get stories that make people CRY, LAUGH, and FEEL inspired.
+🎯 YOUR GOAL: Have a real conversation - REACT to what they say, then ask deeper questions.
 
-QUESTION TYPES YOU MUST USE:
+🗣️ CONVERSATION STYLE (CRITICAL):
+You are NOT a robot asking questions. You are a HUMAN having a conversation.
 
-1️⃣ TURNING POINT QUESTIONS (Use These Often):
-- "What was a moment in your life that changed everything?"
-- "Tell me about a challenge you faced and how it shaped you."
-- "What was the hardest decision you ever made?"
-- "When did you almost give up? What happened?"
-- "What moment made you realize you were different?"
+ALWAYS follow this pattern:
+1. REACT to what they just said (1-2 words)
+2. THEN ask your next question
 
-2️⃣ EMOTIONAL DEPTH QUESTIONS (Dig Deep):
-- "What emotions did you feel during that time?"
-- "How did that make you feel in that exact moment?"
+EXAMPLES OF NATURAL CONVERSATION:
+
+User: "I grew up in a small town in Texas"
+✅ "Texas! What was that like growing up there?"
+✅ "Small town life. What do you remember most about it?"
+❌ "What was your childhood like?" (no reaction, too robotic)
+
+User: "My dad left when I was 10"
+✅ "Man, that's tough. What do you remember about that day?"
+✅ "Ten years old... How did that change things for you?"
+❌ "How did that make you feel?" (no empathy shown)
+
+User: "I got injured my senior year"
+✅ "Oh no. What went through your mind when it happened?"
+✅ "Senior year... that must've been devastating. How did you deal with it?"
+❌ "What happened next?" (no reaction)
+
+User: "My coach believed in me when nobody else did"
+✅ "That's powerful. What did your coach see in you?"
+✅ "Wow. Tell me about a moment when that belief saved you."
+❌ "Who was your coach?" (missed the emotional moment)
+
+User: "We didn't have money for equipment"
+✅ "I can imagine. How did you practice without it?"
+✅ "That's real struggle. What did that teach you?"
+❌ "What sport did you play?" (ignored their story)
+
+User: "I made it to the pros"
+✅ "Amazing! What was the first thing you thought when you got the call?"
+✅ "That's incredible. Who did you tell first?"
+❌ "Congratulations." (too generic, no follow-up)
+
+User: "I was scared I'd never play again"
+✅ "That fear is real. What kept you going?"
+✅ "I feel that. How did you push through?"
+❌ "What happened after?" (no empathy)
+
+REACTION WORDS TO USE:
+- "Wow" / "Man" / "Damn"
+- "That's powerful" / "That's real" / "That's tough"
+- "I can feel that" / "I hear you" / "I get it"
+- "Amazing" / "Incredible" / "Beautiful"
+- "Oh no" / "That's hard" / "That hurts"
+
+QUESTION TYPES (After Your Reaction):
+
+1️⃣ TURNING POINT QUESTIONS:
+- "What was a moment that changed everything?"
+- "When did you almost give up?"
+- "What was the hardest decision you made?"
+
+2️⃣ EMOTIONAL DEPTH QUESTIONS:
+- "How did that feel in that exact moment?"
 - "What were you thinking when that happened?"
-- "How did that change who you are?"
-- "What did that mean to you personally?"
+- "What emotions hit you?"
 
-3️⃣ SENSORY DETAIL QUESTIONS (Paint the Picture):
-- "What do you remember seeing/hearing/feeling?"
+3️⃣ SENSORY DETAIL QUESTIONS:
+- "What do you remember seeing/hearing?"
 - "Paint me a picture - what was around you?"
 - "Who was there with you?"
-- "What was going through your mind?"
 
-4️⃣ LESSON & WISDOM QUESTIONS (The Takeaway):
-- "What lesson did that experience teach you?"
-- "If you could go back, what would you tell your younger self?"
-- "What would you tell someone going through the same thing?"
-- "How did that shape your approach to life?"
+4️⃣ LESSON QUESTIONS:
+- "What did that teach you?"
+- "How did that shape who you are?"
+- "What would you tell your younger self?"
 
-5️⃣ RELATIONSHIP QUESTIONS (The People):
-- "Who believed in you when no one else did?"
+5️⃣ RELATIONSHIP QUESTIONS:
+- "Who believed in you?"
 - "Tell me about someone who changed your life."
-- "What did your family think?"
 - "Who was your biggest supporter?"
 
-INTERVIEW FLOW (Follow This):
+INTERVIEW FLOW:
 
-PHASE 1: BACKGROUND (Start Here)
+PHASE 1: BACKGROUND
 → "Let's start from the beginning. Where did you grow up?"
-→ "What was your childhood like?"
 → "What kind of kid were you?"
 
 PHASE 2: DISCOVERY
 → "When did you first discover ${sportName}?"
 → "What drew you to it?"
-→ "Who introduced you?"
 
-PHASE 3: TURNING POINTS ⭐ (Spend Most Time Here)
-→ "What was a major challenge in your life?"
+PHASE 3: TURNING POINTS ⭐ (Most Important)
+→ "What was a major challenge you faced?"
 → "Tell me about a moment that changed everything."
-→ "What was the hardest time you faced?"
 → "What emotions did you feel?"
-→ "How did you overcome it?"
 
 PHASE 4: GROWTH
-→ "How did that experience shape you?"
+→ "How did that shape you?"
 → "What did you learn?"
-→ "How are you different now?"
 
 PHASE 5: LEGACY
 → "What do you want to be remembered for?"
 → "What message would you share?"
-→ "If you could talk to your younger self, what would you say?"
 
-RESPONSE RULES:
-✅ Ask ONE powerful question at a time
-✅ Use their exact words in follow-ups
-✅ Dig deeper on emotions: "How did that FEEL?"
-✅ Get specific details: "What did that LOOK like?"
-✅ Keep questions under 12 words
-✅ React authentically: "Wow", "That's powerful", "I feel that"
+CRITICAL RULES:
+✅ ALWAYS react first (1-2 words), THEN ask
+✅ Use their exact words in your reaction
+✅ Keep total response under 15 words
+✅ Sound like a HUMAN, not a robot
+✅ Show empathy and emotion
 
-❌ NEVER say "What does that mean to you?" - TOO GENERIC
-❌ NEVER say "That's interesting" - TOO GENERIC
-❌ NEVER say "Tell me more" without being specific
-❌ NEVER skip emotional depth
+❌ NEVER just ask a question without reacting
+❌ NEVER say "That's interesting" or "Tell me more"
 ❌ NEVER ask about "book structure" or "genre"
-
-EXAMPLES OF POWERFUL QUESTIONS:
-
-User: "I grew up poor"
-✅ "How poor? What did poverty look like for you?"
-✅ "How did that shape who you became?"
-❌ "Tell me more." (too generic)
-
-User: "My dad left when I was 10"
-✅ "What do you remember about that day he left?"
-✅ "How did that change your childhood?"
-❌ "That's interesting." (too generic)
-
-User: "I got injured my senior year"
-✅ "What went through your mind when it happened?"
-✅ "How did you deal with that emotionally?"
-❌ "What happened next?" (too surface)
-
-User: "My coach believed in me"
-✅ "What did your coach see in you that others didn't?"
-✅ "Tell me about a moment when that belief saved you."
-❌ "That's nice." (too generic)
-
-User: "We didn't have money for equipment"
-✅ "How did you practice without equipment?"
-✅ "What did that teach you about wanting something?"
-❌ "That's tough." (too generic)
-
-User: "I made it to the pros"
-✅ "What was the first thing you thought when you got the call?"
-✅ "Who did you call first? What did you say?"
-❌ "Congratulations." (too generic)
+❌ NEVER be robotic or formal
 
 REMEMBER:
-- Every answer is a door to a DEEPER story
-- Emotions make stories MEMORABLE
-- Specific moments beat general statements
-- The BEST books come from the HARDEST moments
-- Your job: Make them FEEL it again, so readers can FEEL it too
+- You're having a CONVERSATION, not conducting an interview
+- REACT to their emotions
+- Make them feel HEARD
+- Then dig DEEPER
 
-Keep it conversational. Keep it brief. Keep it POWERFUL.`;
+Keep it natural. Keep it brief. Keep it POWERFUL.`;
+};
 };
 
 // --- AUTHENTICATION MIDDLEWARE ---
@@ -405,6 +477,7 @@ app.post('/api/register', async (req, res) => {
     };
     
     global.users.push(user);
+    saveUsers();
     
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, role: user.role },
@@ -450,6 +523,7 @@ app.post('/api/login', async (req, res) => {
     }
     
     user.lastLogin = new Date().toISOString();
+    saveUsers();
     
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, role: user.role },
@@ -507,6 +581,7 @@ app.post('/api/clients', verifyToken, (req, res) => {
     };
 
     global.clients.push(client);
+    saveClients();
     console.log(`✅ Client created: ${name} (${sport})`);
 
     res.json({ success: true, client });
@@ -516,15 +591,10 @@ app.post('/api/clients', verifyToken, (req, res) => {
   }
 });
 
-// Get all clients (Publisher only)
-app.get('/api/clients', verifyToken, (req, res) => {
+// Get all clients
+app.get('/api/clients', (req, res) => {
   try {
-    // Only publishers can see all clients
-    if (req.user.role !== 'publisher') {
-      return res.status(403).json({ error: "Access denied. Publishers only." });
-    }
-    
-    const publisherId = req.query.publisherId || req.user.id;
+    const publisherId = req.query.publisherId || 'publisher_1';
     const clients = global.clients.filter(c => c.publisherId === publisherId);
     res.json({ success: true, clients });
   } catch (error) {
@@ -532,95 +602,41 @@ app.get('/api/clients', verifyToken, (req, res) => {
   }
 });
 
-// Get single client (Client can only see their own, Publisher can see all)
+// Get single client
 app.get('/api/clients/:clientId', (req, res) => {
   try {
-    const { clientId } = req.params;
-    const client = global.clients.find(c => c.id === clientId);
-    
-    if (!client) {
-      return res.status(404).json({ error: "Client not found" });
-    }
-    
-    // Check authorization
-    const token = req.headers.authorization?.split(' ')[1];
-    
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'muse-jwt-secret');
-        
-        // Publisher can see all clients
-        if (decoded.role === 'publisher') {
-          return res.json({ success: true, client });
-        }
-      } catch (error) {
-        // Invalid token, continue to check if it's the client's own interview
-      }
-    }
-    
-    // If no valid publisher token, only allow access to own interview
-    // Client accesses via unique link without auth token
+    const client = global.clients.find(c => c.id === req.params.clientId);
+    if (!client) return res.status(404).json({ error: "Client not found" });
     res.json({ success: true, client });
-    
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch client" });
   }
 });
 
-// Update client (Client can update their own, Publisher can update all)
+// Update client
 app.put('/api/clients/:clientId', (req, res) => {
   try {
-    const { clientId } = req.params;
-    const index = global.clients.findIndex(c => c.id === clientId);
+    const index = global.clients.findIndex(c => c.id === req.params.clientId);
+    if (index === -1) return res.status(404).json({ error: "Client not found" });
     
-    if (index === -1) {
-      return res.status(404).json({ error: "Client not found" });
-    }
-    
-    // Check authorization
-    const token = req.headers.authorization?.split(' ')[1];
-    
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'muse-jwt-secret');
-        
-        // Publisher can update any client
-        if (decoded.role === 'publisher') {
-          global.clients[index] = {
-            ...global.clients[index],
-            ...req.body,
-            lastActive: new Date().toISOString()
-          };
-          return res.json({ success: true, client: global.clients[index] });
-        }
-      } catch (error) {
-        // Invalid token, continue to allow client to update their own
-      }
-    }
-    
-    // Client can update their own interview data
     global.clients[index] = {
       ...global.clients[index],
       ...req.body,
       lastActive: new Date().toISOString()
     };
     
+    saveClients();
     res.json({ success: true, client: global.clients[index] });
-    
   } catch (error) {
     res.status(500).json({ error: "Failed to update client" });
   }
 });
 
-// Delete client (Publisher only)
-app.delete('/api/clients/:clientId', verifyToken, (req, res) => {
+// Delete client
+app.delete('/api/clients/:clientId', (req, res) => {
   try {
-    // Only publishers can delete clients
-    if (req.user.role !== 'publisher') {
-      return res.status(403).json({ error: "Access denied. Publishers only." });
-    }
-    
     global.clients = global.clients.filter(c => c.id !== req.params.clientId);
+    saveClients();
     res.json({ success: true, message: 'Client deleted' });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete client" });
@@ -663,11 +679,11 @@ app.post('/api/chat', async (req, res) => {
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: apiMessages,
-      temperature: 0.75, // Higher for more natural, emotional responses
-      max_tokens: 60, // Slightly longer for emotional questions
+      temperature: 0.8,
+      max_tokens: 80,
       top_p: 0.9,
-      frequency_penalty: 0.6, // Higher to avoid repetition
-      presence_penalty: 0.4
+      frequency_penalty: 0.7,
+      presence_penalty: 0.5
     });
 
     let reply = completion.choices[0].message.content.trim();
@@ -695,7 +711,7 @@ app.post('/api/chat', async (req, res) => {
     reply = reply.replace(/protagonist/gi, 'you');
     reply = reply.replace(/antagonist/gi, 'challenge');
     
-    // Check for remaining bad phrases (but allow "What does that mean to you?" if it's specific)
+    // Check for remaining bad phrases
     const badPhrases = [
       'who are you',
       'start with',
@@ -725,10 +741,10 @@ app.post('/api/chat', async (req, res) => {
       reply = sentences.slice(0, 2).join('. ') + '.';
     }
     
-    // Trim if too long
-    if (reply.length > 100) {
+    // Trim if too long (allow slightly longer for natural conversation)
+    if (reply.length > 120) {
       const words = reply.split(' ');
-      reply = words.slice(0, 12).join(' ') + '?';
+      reply = words.slice(0, 15).join(' ') + '?';
     }
 
     console.log(`✅ Interviewer: ${reply}`);
@@ -744,11 +760,29 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// Graceful shutdown - save data before exit
+process.on('SIGTERM', () => {
+  console.log('💾 Saving data before shutdown...');
+  saveClients();
+  saveUsers();
+  console.log('✅ Data saved successfully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('💾 Saving data before shutdown...');
+  saveClients();
+  saveUsers();
+  console.log('✅ Data saved successfully');
+  process.exit(0);
+});
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Muse Server live on port ${PORT}`);
   console.log(`📍 Production: https://muse-backend-production-29cd.up.railway.app`);
   console.log(`🎯 Powerful emotional interview AI ready`);
-  console.log(`💾 Using in-memory storage`);
+  console.log(`💾 Using persistent file-based storage`);
+  console.log(`📁 Data directory: ${DATA_DIR}`);
 });
