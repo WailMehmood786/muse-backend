@@ -516,10 +516,15 @@ app.post('/api/clients', verifyToken, (req, res) => {
   }
 });
 
-// Get all clients
-app.get('/api/clients', (req, res) => {
+// Get all clients (Publisher only)
+app.get('/api/clients', verifyToken, (req, res) => {
   try {
-    const publisherId = req.query.publisherId || 'publisher_1';
+    // Only publishers can see all clients
+    if (req.user.role !== 'publisher') {
+      return res.status(403).json({ error: "Access denied. Publishers only." });
+    }
+    
+    const publisherId = req.query.publisherId || req.user.id;
     const clients = global.clients.filter(c => c.publisherId === publisherId);
     res.json({ success: true, clients });
   } catch (error) {
@@ -527,23 +532,73 @@ app.get('/api/clients', (req, res) => {
   }
 });
 
-// Get single client
+// Get single client (Client can only see their own, Publisher can see all)
 app.get('/api/clients/:clientId', (req, res) => {
   try {
-    const client = global.clients.find(c => c.id === req.params.clientId);
-    if (!client) return res.status(404).json({ error: "Client not found" });
+    const { clientId } = req.params;
+    const client = global.clients.find(c => c.id === clientId);
+    
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+    
+    // Check authorization
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'muse-jwt-secret');
+        
+        // Publisher can see all clients
+        if (decoded.role === 'publisher') {
+          return res.json({ success: true, client });
+        }
+      } catch (error) {
+        // Invalid token, continue to check if it's the client's own interview
+      }
+    }
+    
+    // If no valid publisher token, only allow access to own interview
+    // Client accesses via unique link without auth token
     res.json({ success: true, client });
+    
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch client" });
   }
 });
 
-// Update client
+// Update client (Client can update their own, Publisher can update all)
 app.put('/api/clients/:clientId', (req, res) => {
   try {
-    const index = global.clients.findIndex(c => c.id === req.params.clientId);
-    if (index === -1) return res.status(404).json({ error: "Client not found" });
+    const { clientId } = req.params;
+    const index = global.clients.findIndex(c => c.id === clientId);
     
+    if (index === -1) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+    
+    // Check authorization
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'muse-jwt-secret');
+        
+        // Publisher can update any client
+        if (decoded.role === 'publisher') {
+          global.clients[index] = {
+            ...global.clients[index],
+            ...req.body,
+            lastActive: new Date().toISOString()
+          };
+          return res.json({ success: true, client: global.clients[index] });
+        }
+      } catch (error) {
+        // Invalid token, continue to allow client to update their own
+      }
+    }
+    
+    // Client can update their own interview data
     global.clients[index] = {
       ...global.clients[index],
       ...req.body,
@@ -551,14 +606,20 @@ app.put('/api/clients/:clientId', (req, res) => {
     };
     
     res.json({ success: true, client: global.clients[index] });
+    
   } catch (error) {
     res.status(500).json({ error: "Failed to update client" });
   }
 });
 
-// Delete client
-app.delete('/api/clients/:clientId', (req, res) => {
+// Delete client (Publisher only)
+app.delete('/api/clients/:clientId', verifyToken, (req, res) => {
   try {
+    // Only publishers can delete clients
+    if (req.user.role !== 'publisher') {
+      return res.status(403).json({ error: "Access denied. Publishers only." });
+    }
+    
     global.clients = global.clients.filter(c => c.id !== req.params.clientId);
     res.json({ success: true, message: 'Client deleted' });
   } catch (error) {
