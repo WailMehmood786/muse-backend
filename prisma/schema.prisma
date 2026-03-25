@@ -1,44 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
-}
-
-generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String?
-  name      String?
-  googleId  String?  @unique
-  avatar    String?
-  role      String   @default("publisher")
-  createdAt DateTime @default(now())
-  lastLogin DateTime @default(now())
-  clients   Client[]
+  id           String    @id @default(cuid())
+  email        String    @unique
+  password     String?   // Nullable for Google OAuth users
+  name         String
+  avatar       String?
+  googleId     String?   @unique
+  role         String    @default("publisher") // publisher or client
+  createdAt    DateTime  @default(now())
+  lastLogin    DateTime?
+  
+  // Relations
+  clients      Client[]  @relation("PublisherClients")
+  
+  @@index([email])
+  @@index([role])
 }
 
 model Client {
-  id         String   @id @default(uuid())
-  name       String
-  email      String
-  bookTitle  String
-  sport      String   @default("baseball")
-  uniqueLink String
-  publisherId String
-  publisher  User     @relation(fields: [publisherId], references: [id], onDelete: Cascade)
-  sessionId  String?
-  lastActive DateTime @default(now())
-  status     String   @default("pending")
-  progress   Int      @default(0)
-  messages   Json     @default("[]")
-  bookDraft  String   @default("") @db.Text
-  wordCount  Int      @default(0)
-  createdAt  DateTime @default(now())
+  id           String    @id @default(cuid())
+  name         String
+  email        String
+  bookTitle    String
+  sport        String    @default("baseball")
+  uniqueLink   String?
+  
+  // Interview data
+  messages     Json?     // Store conversation history
+  bookDraft    String?   @default("")
+  wordCount    Int       @default(0)
+  progress     Int       @default(0) // Percentage
+  status       String    @default("pending") // pending, active, completed
+  
+  // Metadata
+  sessionId    String?
+  lastActive   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  // Relations
+  publisherId  String
+  publisher    User      @relation("PublisherClients", fields: [publisherId], references: [id])
   
   @@index([publisherId])
+  @@index([status])
+  @@index([email])
 }
