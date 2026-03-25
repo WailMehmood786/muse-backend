@@ -113,6 +113,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 // CORS
 app.use(cors({
   origin: [
+    "https://writer.wailmehmood.com",
     "https://muse-frontend-three.vercel.app",
     "http://localhost:3000",
     "http://localhost:3001"
@@ -260,7 +261,7 @@ app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'em
 
 app.get('/auth/google/callback',
   passport.authenticate('google', { 
-    failureRedirect: `${process.env.FRONTEND_URL || 'https://muse-frontend-three.vercel.app'}?error=auth_failed`,
+    failureRedirect: `${process.env.FRONTEND_URL || 'https://writer.wailmehmood.com'}?error=auth_failed`,
     session: false 
   }),
   (req, res) => {
@@ -271,10 +272,10 @@ app.get('/auth/google/callback',
         { expiresIn: '7d' }
       );
       
-      const frontendUrl = process.env.FRONTEND_URL || 'https://muse-frontend-three.vercel.app';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://writer.wailmehmood.com';
       res.redirect(`${frontendUrl}?token=${token}`);
     } catch (error) {
-      const frontendUrl = process.env.FRONTEND_URL || 'https://muse-frontend-three.vercel.app';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://writer.wailmehmood.com';
       res.redirect(`${frontendUrl}?error=token_failed`);
     }
   }
@@ -384,7 +385,7 @@ app.post('/api/clients', verifyToken, async (req, res) => {
     const { name, email, bookTitle, sport, publisherId } = req.body;
     if (!name || !email || !bookTitle) return res.status(400).json({ error: "All fields required" });
     
-    const frontendUrl = process.env.FRONTEND_URL || 'https://muse-frontend-three.vercel.app';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://writer.wailmehmood.com';
     
     const client = await prisma.client.create({
       data: {
